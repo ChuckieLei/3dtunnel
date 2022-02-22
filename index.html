@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en" >
+
+<head>
+
+  <meta charset="UTF-8">
+  
+<link rel="apple-touch-icon" type="image/png" href="https://cpwebassets.codepen.io/assets/favicon/apple-touch-icon-5ae1a0698dcc2402e9712f7d01ed509a57814f994c660df9f7a952f3060705ee.png" />
+<meta name="apple-mobile-web-app-title" content="CodePen">
+
+<link rel="shortcut icon" type="image/x-icon" href="https://cpwebassets.codepen.io/assets/favicon/favicon-aec34940fbc1a6e787974dcd360f2c6b63348d4b1f4e06c77743096d55480f33.ico" />
+
+<link rel="mask-icon" type="image/x-icon" href="https://cpwebassets.codepen.io/assets/favicon/logo-pin-8f3771b1072e3c38bd662872f6b673a722f4b3ca2421637d5596661b4e2132cc.svg" color="#111" />
+
+
+  <title>3D隧道效果</title>
+  
+  
+  
+  
+<style>
+body{
+  margin:0;
+}
+.experience {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height:100vh;
+  z-index: 2;
+}
+
+.scrollTarget {
+  position: absolute;
+  height: 1000vh;
+  width: 100px;
+  top: 0;
+  z-index: 0;
+}
+
+.vignette-radial {
+  position: fixed;
+  z-index: 11;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  width: 100%;
+  pointer-events: none;
+}
+
+.vignette-radial:after {
+  pointer-events: none;
+  content: ' ';
+  position: absolute;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: radial-gradient(circle, transparent 60%, black 150%);
+}
+</style>
+
+  <script>
+  window.console = window.console || function(t) {};
+</script>
+
+  
+  
+  <script>
+  if (document.location.search.match(/type=embed/gi)) {
+    window.parent.postMessage("resize", "*");
+  }
+</script>
+
+
+</head>
+
+<body translate="no" >
+  <canvas class="experience"></canvas>
+<div class="scrollTarget"></div>
+<div class="vignette-radial"></div>
+  <script src='lib/jquery.min.js'></script>
+<script src='lib/three.min.js'></script>
+<script src='lib/EffectComposer.js'></script>
+<script src='lib/RenderPass.js'></script>
+<script src='lib/ShaderPass.js'></script>
+<script src='lib/CopyShader.js'></script>
+<script src='lib/LuminosityHighPassShader.js'></script>
+<script src='lib/UnrealBloomPass.js'></script>
+<script src='lib/gsap-latest-beta.min.js'></script>
+<script src='lib/ScrollTrigger.min.js'></script>
+      <script id="rendered-js" >
+/*
+  Animated Textures
+  by Aaron Sherrill
+  Copyright 2019
+*/
+
+//
+var Mathutils = {
+  normalize: function (value, min, max) {
+    return (value - min) / (max - min);
+  },
+  interpolate: function (normValue, min, max) {
+    return min + (max - min) * normValue;
+  },
+  map: function (value, min1, max1, min2, max2) {
+    if (value < min1) {
+      value = min1;
+    }
+    if (value > max1) {
+      value = max1;
+    }
+    var res = this.interpolate(this.normalize(value, min1, max1), min2, max2);
+    return res;
+  } };
+
+var markers = [];
+
+
+//Get window size
+var ww = window.innerWidth,
+wh = window.innerHeight;
+
+
+
+init();
+initRenderPass();
+createSkyTube();
+createTubeEdges();
+createParticles();
+initEvent();
+initAction();
+
+var scene,camera,renderer,group,light;
+var cameraRotationProxyX,cameraRotationProxyY;
+function init(){
+  //创建 WebGL renderer
+  var canvas = document.querySelector("canvas");
+  renderer = new THREE.WebGLRenderer({
+    canvas: canvas,
+    antialias: true,
+    shadowMapEnabled: true,
+    shadowMapType: THREE.PCFSoftShadowMap });
+
+  renderer.setSize(ww, wh);
+
+  //创建场景 添加雾效果，是场景朦胧些
+  scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x194794, 0, 100);
+
+  var clock = new THREE.Clock();
+
+  //创建透视类型的相机
+  cameraRotationProxyX = 3.14159;
+  cameraRotationProxyY = 0;
+
+  camera = new THREE.PerspectiveCamera(45, ww / wh, 0.001, 200);
+  camera.rotation.y = cameraRotationProxyX;
+  camera.rotation.z = cameraRotationProxyY;
+
+  group = new THREE.Group();
+  group.position.z = 400;
+
+  group.add(camera);
+  scene.add(group);
+
+  //创建点光源
+  light = new THREE.PointLight(0xffffff, .35, 4, 0);
+  light.castShadow = true;
+  scene.add(light);
+}
+
+var composer;
+function initRenderPass(){
+  var params = {
+    exposure: 1.3,
+    bloomStrength: .9,
+    bloomThreshold: 0,
+    bloomRadius: 0 
+  };
+  //set up render pass
+  var renderScene = new THREE.RenderPass(scene, camera);
+  //创建泛光通道
+  var bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+  bloomPass.renderToScreen = true;
+  bloomPass.threshold = params.bloomThreshold;	//阈值
+  bloomPass.strength = params.bloomStrength;		//强度
+  bloomPass.radius = params.bloomRadius;			  //半径
+  composer = new THREE.EffectComposer(renderer);
+  composer.setSize(window.innerWidth, window.innerHeight);
+  composer.addPass(renderScene);
+  composer.addPass(bloomPass);
+}
+
+var path;
+function createSkyTube(){
+  //Array of points
+  var points = [
+  [10, 89, 0],[50, 88, 10],[76, 139, 20],
+  [126, 141, 12],[150, 112, 8],[157, 73, 0],
+  [180, 44, 5],[207, 35, 10],[232, 36, 0]];
+
+  var p1, p2;
+
+  //points转化为 vertices
+  for (var i = 0; i < points.length; i++) {
+    var x = points[i][0];
+    var y = points[i][2];
+    var z = points[i][1];
+    points[i] = new THREE.Vector3(x, y, z);
+  }
+  //根据路径点创建自定义曲线
+  path = new THREE.CatmullRomCurve3(points);    
+  path.tension = .5;
+
+  //创建TubeGeometry
+  var geometry = new THREE.TubeGeometry(path, 300, 4, 32, false);     
+
+  //贴图
+  var texture = new THREE.TextureLoader().load('res/3d_space_5.jpg', function (texture) {
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.offset.set(0, 0);
+    texture.repeat.set(15, 2);
+  });
+
+  //凹凸贴图，影响光照感知深度
+  var mapHeight = new THREE.TextureLoader().load('res/waveform-bump3.jpg', function (texture) {
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.offset.set(0, 0);
+    texture.repeat.set(15, 2);
+  });
+
+  //创建MeshPhong镜面高光材质
+  var material = new THREE.MeshPhongMaterial({
+    side: THREE.BackSide,
+    map: texture,
+    shininess: 20,
+    bumpMap: mapHeight,
+    bumpScale: -.03,
+    specular: 0x0b2349 }
+  );
+
+  //Create a mesh
+  var tube = new THREE.Mesh(geometry, material);
+  scene.add(tube);
+}
+
+//inner tube.=========================================
+
+//再创建半径略小的管道,添加几何体辅助线
+function createTubeEdges(){
+  var geometry = new THREE.TubeGeometry(path, 150, 3.4, 32, false);
+  //创建边缘几何体
+  var geo = new THREE.EdgesGeometry(geometry);    
+  var mat = new THREE.LineBasicMaterial({
+    linewidth: 2,
+    opacity: .2,
+    transparent: 1 }
+  );
+
+  //创建线段
+  var wireframe = new THREE.LineSegments(geo, mat);
+  scene.add(wireframe);
+}
+
+//更新相机位置
+function updateCameraPercentage(percentage) {
+  //camera位于p1点看向p2点
+  p1 = path.getPointAt(percentage);
+  p2 = path.getPointAt(percentage + 0.03);
+
+  group.position.set(p1.x, p1.y, p1.z);
+  group.lookAt(p2);
+  light.position.set(p2.x, p2.y, p2.z);
+}
+
+
+var cameraTargetPercentage = 0;
+var currentCameraPercentage = 0;
+
+//初始化gsap鼠标滚动
+function initAction(){
+  gsap.defaultEase = Linear.easeNone;
+
+  var tubePerc = {percent: 0 };
+
+  //注册ScrollTrigger
+  gsap.registerPlugin(ScrollTrigger);
+
+  var tl = gsap.timeline({
+    scrollTrigger: {
+      trigger: ".scrollTarget",
+      start: "top top",
+      end: "bottom 100%",
+      scrub: 5,
+      markers: { color: "white" } } 
+  });
+
+  tl.to(tubePerc, {
+    percent: .96,
+    ease: Linear.easeNone,
+    duration: 10,
+    onUpdate: function () {
+      cameraTargetPercentage = tubePerc.percent;
+    } 
+  });
+}
+
+function render() {
+  currentCameraPercentage = cameraTargetPercentage;
+
+  camera.rotation.y += (cameraRotationProxyX - camera.rotation.y) / 15;
+  camera.rotation.x += (cameraRotationProxyY - camera.rotation.x) / 15;
+
+  updateCameraPercentage(currentCameraPercentage);
+
+  //animate texture
+
+  particleSystem1.rotation.y += 0.00002;
+  particleSystem2.rotation.x += 0.00005;
+  particleSystem3.rotation.z += 0.00001;
+
+  //Render the scene
+  // renderer.render(scene, camera);
+  composer.render();
+
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+function initEvent(){
+  window.addEventListener('resize', function () {
+
+  var width = window.innerWidth;
+  var height = window.innerHeight;
+
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+
+  renderer.setSize(width, height);
+  composer.setSize(width, height);
+  
+  }, false);
+
+  //鼠标的偏移效果
+  document.addEventListener('mousemove', (evt)=>{
+    cameraRotationProxyX = Mathutils.map(evt.clientX, 0, window.innerWidth, 3.24, 3.04);
+    cameraRotationProxyY = Mathutils.map(evt.clientY, 0, window.innerHeight, -.1, .1);
+  })
+}
+
+var particleSystem1,particleSystem2,particleSystem3;
+function createParticles(){
+  var lastPlace = 0;
+  var newPlace = 0;
+
+  //粒子贴图
+  var spikeyTexture = new THREE.TextureLoader().load('res/spikey.png');
+
+  var particleCount = 6800;
+  particles1 = new THREE.Geometry();
+  particles2 = new THREE.Geometry();
+  particles3 = new THREE.Geometry();
+
+  //粒子材质
+  pMaterial = new THREE.ParticleBasicMaterial({
+    color: 0xFFFFFF,
+    size: .5,
+    map: spikeyTexture,
+    transparent: true,
+    blending: THREE.AdditiveBlending 
+  });
+
+
+  for (var p = 0; p < particleCount; p++) {
+    // 随机创建粒子
+    // 随机值 -250 -> 250
+    var pX = Math.random() * 500 - 250,
+    pY = Math.random() * 50 - 25,
+    pZ = Math.random() * 500 - 250,
+    particle = new THREE.Vector3(pX, pY, pZ);
+    particles1.vertices.push(particle);
+  }
+
+  for (var p = 0; p < particleCount; p++) {
+    // 随机创建粒子
+    // 随机值 -250 -> 250
+    var pX = Math.random() * 500,
+    pY = Math.random() * 10 - 5,
+    pZ = Math.random() * 500,
+    particle = new THREE.Vector3(pX, pY, pZ);
+    particles2.vertices.push(particle);
+  }
+
+  for (var p = 0; p < particleCount; p++) {
+    // 随机创建粒子
+    // 随机值 -250 -> 250
+    var pX = Math.random() * 500,
+    pY = Math.random() * 10 - 5,
+    pZ = Math.random() * 500,
+    particle = new THREE.Vector3(pX, pY, pZ);
+    particles3.vertices.push(particle);
+  }
+
+  // create the particle system
+  particleSystem1 = new THREE.ParticleSystem(particles1,pMaterial);
+  particleSystem2 = new THREE.ParticleSystem(particles2,pMaterial);
+  particleSystem3 = new THREE.ParticleSystem(particles3,pMaterial);
+
+  // add it to the scene
+  scene.add(particleSystem1);
+  scene.add(particleSystem2);
+  scene.add(particleSystem3);
+}
+// //# sourceURL=pen.js
+    </script>
+
+  
+
+</body>
+
+</html>
